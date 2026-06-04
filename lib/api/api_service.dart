@@ -1,9 +1,12 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:connectivity_plus/connectivity_plus.dart';
+import '../config/config.dart';
+import '../db/database_helper.dart';
+import '../models/incidente_local.dart';
 class ApiService {
-  static const String baseUrl = 'http://jvqy3e0tujy89or5hhad84xe.67.205.132.14.sslip.io';
+  static String get baseUrl => Config.apiUrl;
 
   static Future<Map<String, dynamic>> registerConductor(Map<String, dynamic> data) async {
     final response = await http.post(
@@ -110,19 +113,59 @@ class ApiService {
     
     if (token == null) throw Exception('No autenticado');
 
-    final response = await http.post(
-      Uri.parse('$baseUrl/incidentes/reportar'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-      body: jsonEncode(data),
-    );
+    // Comprobar conectividad
+    final connectivityResult = await (Connectivity().checkConnectivity());
+    bool isOnline = connectivityResult.contains(ConnectivityResult.mobile) || 
+                    connectivityResult.contains(ConnectivityResult.wifi) || 
+                    connectivityResult.contains(ConnectivityResult.ethernet);
 
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception(jsonDecode(response.body)['detail'] ?? 'Error al reportar incidente');
+    if (!isOnline) {
+      // Guardar localmente
+      final localIncidente = IncidenteLocal(
+        coordenadagps: data['coordenadagps'],
+        descripcion: data['descripcion'],
+        fecha: DateTime.now().toIso8601String(),
+        estado: 'PENDIENTE',
+        isSynced: false,
+      );
+      final saved = await DatabaseHelper.instance.create(localIncidente);
+      return {
+        'mensaje': 'Sin conexión. Incidente guardado localmente.',
+        'id': saved.id,
+        'estado': 'PENDIENTE (Offline)'
+      };
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/incidentes/reportar'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(data),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception(jsonDecode(response.body)['detail'] ?? 'Error al reportar incidente');
+      }
+    } catch (e) {
+      // Si falla la petición (ej. no hay internet a pesar de que Connectivity dijo que sí), guardamos local
+      final localIncidente = IncidenteLocal(
+        coordenadagps: data['coordenadagps'],
+        descripcion: data['descripcion'],
+        fecha: DateTime.now().toIso8601String(),
+        estado: 'PENDIENTE',
+        isSynced: false,
+      );
+      final saved = await DatabaseHelper.instance.create(localIncidente);
+      return {
+        'mensaje': 'Fallo de red. Incidente guardado localmente.',
+        'id': saved.id,
+        'estado': 'PENDIENTE (Offline)'
+      };
     }
   }
 

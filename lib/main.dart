@@ -4,6 +4,8 @@ import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'api/api_service.dart';
 import 'services/fcm_service.dart';
+import 'services/connectivity_service.dart';
+import 'services/sync_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,6 +15,18 @@ void main() async {
   } catch (e) {
     print('Firebase initialization error. Make sure to download and place google-services.json from Firebase Console: $e');
   }
+
+  // Configurar monitoreo de conectividad para Offline-First Sync
+  final connectivityService = ConnectivityService();
+  final syncService = SyncService();
+  
+  connectivityService.connectionStatusStream.listen((isOnline) {
+    if (isOnline) {
+      print('Dispositivo en línea. Iniciando sincronización...');
+      syncService.syncUnsyncedIncidentes();
+    }
+  });
+
   runApp(const AppConductores());
 }
 
