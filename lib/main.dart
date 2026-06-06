@@ -6,6 +6,7 @@ import 'api/api_service.dart';
 import 'services/fcm_service.dart';
 import 'services/connectivity_service.dart';
 import 'services/sync_service.dart';
+import 'config/theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,10 +39,7 @@ class AppConductores extends StatelessWidget {
     return MaterialApp(
       title: 'App Conductores',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.indigo,
-        useMaterial3: true,
-      ),
+      theme: AppTheme.lightTheme,
       home: FutureBuilder<bool>(
         future: ApiService.isLoggedIn(),
         builder: (context, snapshot) {

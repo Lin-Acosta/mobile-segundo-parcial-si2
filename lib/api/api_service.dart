@@ -34,21 +34,58 @@ class ApiService {
 
     if (response.statusCode == 200) {
       final body = jsonDecode(response.body);
+      
+      // Si el backend pide selección de tenant (usuario multi-tenant)
+      if (body['requires_tenant_selection'] == true) {
+        final tenants = body['tenants'] as List;
+        // Buscar el primer tenant donde sea Conductor o Mecanico
+        final targetTenant = tenants.firstWhere(
+          (t) => t['rol'] == 'Conductor' || t['rol'] == 'Mecanico', 
+          orElse: () => null
+        );
+
+        if (targetTenant == null) {
+          throw Exception('Acceso Denegado. Solo Conductores o Mecánicos pueden usar esta App.');
+        }
+
+        // Hacer la petición de select-tenant
+        final tempToken = body['temp_token'];
+        final selectResponse = await http.post(
+          Uri.parse('$baseUrl/auth/select-tenant'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'temp_token': tempToken,
+            'tenant_id': targetTenant['id']
+          }),
+        );
+
+        if (selectResponse.statusCode == 200) {
+          final selectBody = jsonDecode(selectResponse.body);
+          return _guardarSesion(selectBody['access_token'], selectBody['role']);
+        } else {
+          throw Exception('Error al verificar la organización del conductor.');
+        }
+      }
+
+      // Si es un login directo (1 solo tenant o conductor global)
       final token = body['access_token'];
       final role = body['role'];
       
-      // Bloquear cualquier ingreso que no sea conductor
       if (role != 'Conductor') {
          throw Exception('Acceso Denegado. Solo Conductores pueden usar esta App.');
       }
       
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('token', token);
-      await prefs.setString('role', role);
-      return token;
+      return _guardarSesion(token, role);
     } else {
       throw Exception(jsonDecode(response.body)['detail'] ?? 'Error de credenciales');
     }
+  }
+
+  static Future<String> _guardarSesion(String token, String role) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('token', token);
+    await prefs.setString('role', role);
+    return token;
   }
 
   static Future<void> logout() async {
@@ -517,6 +554,38 @@ class ApiService {
       return jsonDecode(response.body);
     } else {
       throw Exception(jsonDecode(response.body)['detail'] ?? 'Error al enviar mensaje');
+    }
+  }
+
+  static Future<List<dynamic>> getMantenimientosTaller() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('access_token');
+    final response = await http.get(
+      Uri.parse('$baseUrl/incidentes/mantenimientos'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Error al obtener mantenimientos');
+    }
+  }
+
+  static Future<void> actualizarEstadoIncidente(int incidenteId, String nuevoEstado) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('access_token');
+    final response = await http.patch(
+      Uri.parse('$baseUrl/incidentes/$incidenteId/estado'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json'
+      },
+      body: jsonEncode({'nuevo_estado': nuevoEstado}),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Error al actualizar estado');
     }
   }
 }

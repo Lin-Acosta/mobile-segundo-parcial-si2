@@ -4,6 +4,7 @@ import '../api/api_service.dart';
 import '../services/fcm_service.dart';
 import 'estado_incidente_screen.dart';
 import 'package:latlong2/latlong.dart';
+import '../config/theme.dart';
 
 class HistorialIncidentesScreen extends StatefulWidget {
   final LatLng? gpsReal;
@@ -86,13 +87,13 @@ class _HistorialIncidentesScreenState extends State<HistorialIncidentesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F1523),
+      backgroundColor: AppTheme.gray50,
       appBar: AppBar(
         title: const Text('Historial de Incidentes',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xFF1A2236),
+            style: TextStyle(color: AppTheme.gray900, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+        backgroundColor: Colors.white,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: AppTheme.gray900),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
