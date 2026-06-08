@@ -70,4 +70,46 @@ class SyncService {
 
     print('[Sync] Resultado: $exitosos exitosos, $fallidos fallidos de ${unsynced.length} total.');
   }
+
+  /// Sincroniza ediciones de perfil pendientes con el backend.
+  Future<void> syncPendingProfileUpdates() async {
+    final pending = await dbHelper.readUnsyncedProfileUpdates();
+    if (pending.isEmpty) return;
+
+    print('[Sync] Sincronizando ${pending.length} actualizaciones de perfil pendientes...');
+
+    final token = await _getToken();
+    if (token.isEmpty) {
+      print('[Sync] No hay token. Abortando sync de perfil.');
+      return;
+    }
+
+    for (var row in pending) {
+      try {
+        final response = await http.put(
+          Uri.parse('${Config.apiUrl}/profile/me'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: row['payload'] as String,
+        ).timeout(const Duration(seconds: 15));
+
+        if (response.statusCode == 200) {
+          await dbHelper.markProfileUpdateSynced(row['id'] as int);
+          print('[Sync] Perfil update #${row['id']} sincronizado.');
+        } else {
+          print('[Sync] Perfil update #${row['id']} falló: ${response.statusCode}');
+        }
+      } catch (e) {
+        print('[Sync] Error sync perfil #${row['id']}: $e');
+      }
+    }
+  }
+
+  /// Sincroniza todo: incidentes + perfil
+  Future<void> syncAll() async {
+    await syncUnsyncedIncidentes();
+    await syncPendingProfileUpdates();
+  }
 }

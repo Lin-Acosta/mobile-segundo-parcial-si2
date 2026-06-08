@@ -71,8 +71,8 @@ class ApiService {
       final token = body['access_token'];
       final role = body['role'];
       
-      if (role != 'Conductor') {
-         throw Exception('Acceso Denegado. Solo Conductores pueden usar esta App.');
+      if (role != 'Conductor' && role != 'Mecanico') {
+         throw Exception('Acceso Denegado. Solo Conductores o Mecánicos pueden usar esta App.');
       }
       
       return _guardarSesion(token, role);
@@ -97,6 +97,11 @@ class ApiService {
   static Future<bool> isLoggedIn() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.containsKey('token');
+  }
+
+  static Future<String?> getRole() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('role');
   }
 
   // --- Endpoints de Vehículos ---

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/mechanic_home_screen.dart';
 import 'api/api_service.dart';
 import 'services/fcm_service.dart';
 import 'services/connectivity_service.dart';
@@ -24,7 +25,7 @@ void main() async {
   connectivityService.connectionStatusStream.listen((isOnline) {
     if (isOnline) {
       print('Dispositivo en línea. Iniciando sincronización...');
-      syncService.syncUnsyncedIncidentes();
+      syncService.syncAll();
     }
   });
 
@@ -40,18 +41,24 @@ class AppConductores extends StatelessWidget {
       title: 'App Conductores',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: FutureBuilder<bool>(
-        future: ApiService.isLoggedIn(),
+      home: FutureBuilder<String?>(
+        future: ApiService.isLoggedIn().then((isLogged) async {
+          if (!isLogged) return null;
+          return await ApiService.getRole();
+        }),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
               body: Center(child: CircularProgressIndicator()),
             );
           }
-          if (snapshot.data == true) {
-            return HomeScreen();
-          } else {
+          final role = snapshot.data;
+          if (role == null) {
             return LoginScreen();
+          } else if (role == 'Mecanico') {
+            return MechanicHomeScreen();
+          } else {
+            return HomeScreen();
           }
         },
       ),

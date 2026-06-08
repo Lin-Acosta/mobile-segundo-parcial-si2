@@ -26,7 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await FcmService.updateTokenOnServer();
       
       final prefs = await SharedPreferences.getInstance();
-      final role = prefs.getString('user_role') ?? 'Conductor';
+      final role = prefs.getString('role') ?? 'Conductor';
 
       if (mounted) {
         if (role == 'Mecanico') {

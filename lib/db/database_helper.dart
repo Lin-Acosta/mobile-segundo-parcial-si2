@@ -20,7 +20,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -45,14 +45,32 @@ CREATE TABLE incidentes (
   audio_base64 $textNullable
 )
 ''');
+
+    await db.execute('''
+CREATE TABLE pending_profile_updates (
+  id $idType,
+  payload TEXT NOT NULL,
+  fecha TEXT NOT NULL,
+  is_synced $boolType
+)
+''');
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Agregar columnas nuevas para soporte offline completo
       await db.execute('ALTER TABLE incidentes ADD COLUMN vehiculo_id INTEGER');
       await db.execute('ALTER TABLE incidentes ADD COLUMN fotos_base64 TEXT');
       await db.execute('ALTER TABLE incidentes ADD COLUMN audio_base64 TEXT');
+    }
+    if (oldVersion < 3) {
+      await db.execute('''
+CREATE TABLE IF NOT EXISTS pending_profile_updates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payload TEXT NOT NULL,
+  fecha TEXT NOT NULL,
+  is_synced BOOLEAN NOT NULL
+)
+''');
     }
   }
 
@@ -120,6 +138,54 @@ CREATE TABLE incidentes (
     final db = await instance.database;
     final result = await db.rawQuery(
       'SELECT COUNT(*) as count FROM incidentes WHERE is_synced = 0',
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  // ─── PROFILE UPDATE QUEUE ─────────────────────────────────────
+
+  Future<int> createPendingProfileUpdate(String payloadJson) async {
+    final db = await instance.database;
+    return await db.insert('pending_profile_updates', {
+      'payload': payloadJson,
+      'fecha': DateTime.now().toIso8601String(),
+      'is_synced': 0,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> readUnsyncedProfileUpdates() async {
+    final db = await instance.database;
+    return await db.query(
+      'pending_profile_updates',
+      where: 'is_synced = ?',
+      whereArgs: [0],
+      orderBy: 'id ASC',
+    );
+  }
+
+  Future<void> markProfileUpdateSynced(int id) async {
+    final db = await instance.database;
+    await db.update(
+      'pending_profile_updates',
+      {'is_synced': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteProfileUpdate(int id) async {
+    final db = await instance.database;
+    await db.delete(
+      'pending_profile_updates',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> countUnsyncedProfileUpdates() async {
+    final db = await instance.database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM pending_profile_updates WHERE is_synced = 0',
     );
     return Sqflite.firstIntValue(result) ?? 0;
   }
