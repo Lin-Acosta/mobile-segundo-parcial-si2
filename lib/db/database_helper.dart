@@ -20,8 +20,9 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDB,
+      onUpgrade: _upgradeDB,
     );
   }
 
@@ -38,9 +39,21 @@ CREATE TABLE incidentes (
   descripcion $textNullable,
   fecha $textType,
   estado $textType,
-  is_synced $boolType
+  is_synced $boolType,
+  vehiculo_id INTEGER,
+  fotos_base64 $textNullable,
+  audio_base64 $textNullable
 )
 ''');
+  }
+
+  Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Agregar columnas nuevas para soporte offline completo
+      await db.execute('ALTER TABLE incidentes ADD COLUMN vehiculo_id INTEGER');
+      await db.execute('ALTER TABLE incidentes ADD COLUMN fotos_base64 TEXT');
+      await db.execute('ALTER TABLE incidentes ADD COLUMN audio_base64 TEXT');
+    }
   }
 
   Future<IncidenteLocal> create(IncidenteLocal incidente) async {
@@ -60,6 +73,15 @@ CREATE TABLE incidentes (
     return result.map((json) => IncidenteLocal.fromMap(json)).toList();
   }
 
+  Future<List<IncidenteLocal>> readAllIncidentesLocales() async {
+    final db = await instance.database;
+    final result = await db.query(
+      'incidentes',
+      orderBy: 'id DESC',
+    );
+    return result.map((json) => IncidenteLocal.fromMap(json)).toList();
+  }
+
   Future<int> update(IncidenteLocal incidente) async {
     final db = await instance.database;
     return db.update(
@@ -74,10 +96,32 @@ CREATE TABLE incidentes (
     final db = await instance.database;
     await db.update(
       'incidentes',
-      {'is_synced': 1},
+      {
+        'is_synced': 1,
+        'estado': 'Sincronizado',
+        'fotos_base64': null, // Liberar memoria después de sincronizar
+        'audio_base64': null,
+      },
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<void> deleteIncidente(int id) async {
+    final db = await instance.database;
+    await db.delete(
+      'incidentes',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> countUnsyncedIncidentes() async {
+    final db = await instance.database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM incidentes WHERE is_synced = 0',
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
   }
 
   Future close() async {

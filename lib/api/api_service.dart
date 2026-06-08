@@ -588,4 +588,6 @@ class ApiService {
       throw Exception('Error al actualizar estado');
     }
   }
+
+
 }

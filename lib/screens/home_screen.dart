@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -7,6 +8,8 @@ import 'package:geolocator/geolocator.dart';
 import '../api/api_service.dart';
 import '../config/theme.dart';
 import '../services/websocket_service.dart';
+import '../services/connectivity_service.dart';
+import '../db/database_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'login_screen.dart';
 import 'registrar_vehiculo_screen.dart';
@@ -27,14 +30,59 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isLoadingGps = true;
   StreamSubscription<Position>? _positionStreamSubscription;
   final WebSocketService _webSocketService = WebSocketService();
+  
+  // Offline support
+  final ConnectivityService _connectivityService = ConnectivityService();
+  StreamSubscription<bool>? _connectivitySubscription;
+  bool _isOnline = true;
+  int _pendingCount = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _vehiculosFuture = ApiService.getVehiculos();
+    _vehiculosFuture = _loadVehiculos();
     _initMap();
     _initWebSocket();
+    _initConnectivity();
+    _updatePendingCount();
+  }
+
+  Future<List<dynamic>> _loadVehiculos() async {
+    try {
+      final vehiculos = await ApiService.getVehiculos();
+      // Cachear en SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_vehiculos', jsonEncode(vehiculos));
+      return vehiculos;
+    } catch (e) {
+      // Si falla (offline), cargar del cache
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString('cached_vehiculos');
+      if (cached != null) {
+        return List<dynamic>.from(jsonDecode(cached));
+      }
+      return [];
+    }
+  }
+
+  void _initConnectivity() {
+    _isOnline = _connectivityService.isOnline;
+    _connectivitySubscription = _connectivityService.connectionStatusStream.listen((isOnline) {
+      if (mounted) {
+        setState(() => _isOnline = isOnline);
+        if (isOnline) {
+          _updatePendingCount();
+        }
+      }
+    });
+  }
+
+  Future<void> _updatePendingCount() async {
+    final count = await DatabaseHelper.instance.countUnsyncedIncidentes();
+    if (mounted) {
+      setState(() => _pendingCount = count);
+    }
   }
 
   Future<void> _initWebSocket() async {
@@ -80,6 +128,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     _positionStreamSubscription?.cancel();
+    _connectivitySubscription?.cancel();
+    _connectivityService.dispose();
     _webSocketService.disconnect();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -152,6 +202,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           _currentLocation = LatLng(position.latitude, position.longitude);
         });
+        _mapController.move(_currentLocation!, _mapController.camera.zoom);
       }
     });
   }
@@ -231,8 +282,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _refreshList() {
     setState(() {
-      _vehiculosFuture = ApiService.getVehiculos();
+      _vehiculosFuture = _loadVehiculos();
     });
+    _updatePendingCount();
   }
 
   void _mostrarMisVehiculos() async {
@@ -407,6 +459,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
                     SizedBox(width: 16),
                     Text("Buscando tu ubicación...", style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.gray900))
+                  ],
+                ),
+              ),
+            ),
+          
+          // ─── OFFLINE BANNER ───
+          if (!_isOnline)
+            Positioned(
+              top: 100,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.orange.shade700, Colors.orange.shade600],
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(color: Colors.orange.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.cloud_off, color: Colors.white, size: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Modo Offline',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14),
+                          ),
+                          Text(
+                            _pendingCount > 0
+                                ? '$_pendingCount reporte(s) pendiente(s) de envío'
+                                : 'Puedes reportar emergencias sin internet',
+                            style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_pendingCount > 0)
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '$_pendingCount',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+                        ),
+                      ),
                   ],
                 ),
               ),

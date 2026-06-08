@@ -1,3 +1,4 @@
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../db/database_helper.dart';
@@ -7,42 +8,66 @@ import '../config/config.dart';
 class SyncService {
   final DatabaseHelper dbHelper = DatabaseHelper.instance;
 
+  Future<String> _getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('token') ?? '';
+  }
+
+  /// Sincroniza todos los incidentes pendientes con el backend.
+  /// Envía cada uno individualmente con fotos, audio y vehículo completos.
   Future<void> syncUnsyncedIncidentes() async {
     final unsynced = await dbHelper.readAllUnsyncedIncidentes();
     if (unsynced.isEmpty) return;
 
-    print('Attempting to sync ${unsynced.length} incidentes...');
+    print('[Sync] Intentando sincronizar ${unsynced.length} incidentes offline...');
 
-    final payload = unsynced.map((e) => {
-      'coordenadagps': e.coordenadagps,
-      'descripcion': e.descripcion,
-      'fecha': e.fecha,
-      // The backend will generate ID and vehiculoconductor_id from JWT
-    }).toList();
+    final token = await _getToken();
+    if (token.isEmpty) {
+      print('[Sync] No hay token de autenticación. Abortando sync.');
+      return;
+    }
 
-    try {
-      final response = await http.post(
-        Uri.parse('${Config.apiUrl}/offline-sync/incidentes'),
-        headers: {
-          'Content-Type': 'application/json',
-          // Assuming a token provider here, for demo purposes we just print
-        },
-        body: jsonEncode(payload),
-      );
+    int exitosos = 0;
+    int fallidos = 0;
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        // Mark all as synced
-        for (var inc in unsynced) {
+    for (var inc in unsynced) {
+      try {
+        final payload = {
+          'local_id': inc.id.toString(),
+          'coordenadagps': inc.coordenadagps,
+          'descripcion': inc.descripcion ?? '',
+          'fecha': inc.fecha,
+          'vehiculo_id': inc.vehiculoId,
+          'fotos': inc.fotosBase64 ?? '',
+          'audio': inc.audioBase64 ?? '',
+        };
+
+        final response = await http.post(
+          Uri.parse('${Config.apiUrl}/offline-sync/incidente-completo'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode(payload),
+        ).timeout(const Duration(seconds: 60)); // timeout generoso para fotos grandes
+
+        if (response.statusCode == 200 || response.statusCode == 201) {
           if (inc.id != null) {
             await dbHelper.markAsSynced(inc.id!);
           }
+          exitosos++;
+          print('[Sync] Incidente local #${inc.id} sincronizado exitosamente.');
+        } else {
+          fallidos++;
+          print('[Sync] Falló sync de incidente #${inc.id}: ${response.statusCode} — ${response.body}');
         }
-        print('Sync successful.');
-      } else {
-        print('Sync failed with status: ${response.statusCode}');
+      } catch (e) {
+        fallidos++;
+        print('[Sync] Error al sincronizar incidente #${inc.id}: $e');
+        // No detener el loop; continuar con el siguiente
       }
-    } catch (e) {
-      print('Sync failed: $e');
     }
+
+    print('[Sync] Resultado: $exitosos exitosos, $fallidos fallidos de ${unsynced.length} total.');
   }
 }

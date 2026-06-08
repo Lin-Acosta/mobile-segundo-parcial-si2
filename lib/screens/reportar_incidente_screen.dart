@@ -8,6 +8,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../api/api_service.dart';
 import '../config/theme.dart';
+import '../services/connectivity_service.dart';
+import '../db/database_helper.dart';
+import '../models/incidente_local.dart';
 import 'estado_incidente_screen.dart';
 
 class ReportarIncidenteScreen extends StatefulWidget {
@@ -182,6 +185,45 @@ class _ReportarIncidenteScreenState extends State<ReportarIncidenteScreen> {
     });
   }
 
+  Future<void> _guardarOffline(String coordenadas, String fotosEncoded) async {
+    final dbHelper = DatabaseHelper.instance;
+    await dbHelper.create(IncidenteLocal(
+      coordenadagps: coordenadas,
+      descripcion: _descripcionController.text.trim(),
+      fecha: DateTime.now().toIso8601String(),
+      estado: "Pendiente de Sincronización",
+      isSynced: false,
+      vehiculoId: _vehiculoSeleccionadoId,
+      fotosBase64: fotosEncoded.isNotEmpty ? fotosEncoded : null,
+      audioBase64: _audioBase64.isNotEmpty ? _audioBase64 : null,
+    ));
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: const [
+              Icon(Icons.cloud_off, color: Colors.white, size: 20),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Sin conexión. Reporte guardado localmente.\nSe enviará automáticamente al recuperar internet.',
+                  style: TextStyle(fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          duration: const Duration(seconds: 5),
+          backgroundColor: Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(16),
+        ),
+      );
+      Navigator.pop(context);
+    }
+  }
+
   Future<void> _submitIncidente() async {
     if (_vehiculoSeleccionadoId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -207,17 +249,34 @@ class _ReportarIncidenteScreenState extends State<ReportarIncidenteScreen> {
           }
         };
 
-        final resultado = await ApiService.reportarIncidente(payload);
+        final connectivity = ConnectivityService();
+        await connectivity.checkInitialConnection();
         
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => EstadoIncidenteScreen(
-                incidente: resultado,
-                gpsReal: widget.gpsReal,
-              ),
-            ),
+        if (connectivity.isOnline) {
+          try {
+            final resultado = await ApiService.reportarIncidente(payload);
+            if (mounted) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => EstadoIncidenteScreen(
+                    incidente: resultado,
+                    gpsReal: widget.gpsReal,
+                  ),
+                ),
+              );
+            }
+          } catch (networkError) {
+            // Si falla la red aunque Connectivity dijo online, guardar offline
+            await _guardarOffline(
+              payload['coordenadagps'] as String,
+              fotosEncoded,
+            );
+          }
+        } else {
+          await _guardarOffline(
+            payload['coordenadagps'] as String,
+            fotosEncoded,
           );
         }
       } catch (e) {
